@@ -1,0 +1,74 @@
+name: Build and test
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  build-macos:
+    strategy:
+      matrix:
+        include:
+          # Swift 5.8.1
+          - os: macos-13
+            xcode: Xcode_14.3.1
+          # Swift 5.9.0
+          - os: macos-13
+            xcode: Xcode_15.0.1
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          submodules: recursive
+      - id: setup-swiftwasm
+        uses: swiftwasm/setup-swiftwasm@v1
+        with:
+          swift-version: "wasm-5.8.0-RELEASE"
+      - name: Select Xcode version
+        run: sudo xcode-select -switch /Applications/${{ matrix.xcode }}.app
+      - name: Configure Tests/default.json
+        run: |
+          cat <<EOS > Tests/default.json
+          {
+            "swiftExecutablePath": "${{ steps.setup-swiftwasm.outputs.toolchain-path }}/usr/bin/swift",
+            "hostSwiftExecutablePath": "$(xcrun --find swift)",
+            "hostSdkRootPath": "$(xcrun --show-sdk-path --sdk macosx)"
+          }
+          EOS
+      - run: env PATH=/usr/bin:$PATH swift test
+      # TODO: Enable spectest and wasi-testsuite checks
+
+  build-linux:
+    strategy:
+      matrix:
+        swift:
+          - "5.8-focal"
+          - "5.8-amazonlinux2"
+          - "5.9-focal"
+          - "5.9-amazonlinux2"
+
+    container:
+      image: swift:${{ matrix.swift }}
+    runs-on: ubuntu-20.04
+
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          submodules: recursive
+      - id: setup-swiftwasm
+        uses: swiftwasm/setup-swiftwasm@v1
+        with:
+          swift-version: "wasm-5.8.0-RELEASE"
+      - name: Configure Tests/default.json
+        run: |
+          cat <<EOS > Tests/default.json
+          {
+            "swiftExecutablePath": "${{ steps.setup-swiftwasm.outputs.toolchain-path }}/usr/bin/swift",
+            "hostSwiftExecutablePath": "/usr/bin/swift"
+          }
+          EOS
+      - run: env PATH=/usr/bin:$PATH swift test
+      - run: ./CI/check-spectest.sh
+      - run: ./CI/check-wasi-testsuite.sh
